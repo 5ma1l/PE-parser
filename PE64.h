@@ -2,9 +2,19 @@
 class PE64
 {
 public:
-    PE64(char* _NAME, FILE* Ppefile);
+    PE64(char* _NAME, FILE* _Ppefile) {
+        NAME = _NAME;
+        Ppefile = _Ppefile;
 
-    void PrintInfo();
+        ParseFile();
+    }
+
+    void PrintInfo(){
+        PrintDOSHeaderInfo();
+        PrintRichHeaderInfo();
+        PrintNTHeadersInfo();
+        PrintSectionHeadersInfo();
+    }
 
 private:
     char* NAME;
@@ -73,24 +83,251 @@ private:
     // FUNCTIONS
 
     // ADDRESS RESOLVERS
-    int  locate(DWORD VA);
-    DWORD resolve(DWORD VA, int index);
+    int  locate(DWORD VA) {
+        int in;
+        for (int i = 0; i < PEFILE_NT_HEADERS_FILE_HEADER_NUMBER0F_SECTIONS; i++) {
+            if (VA >= PEFILE_SECTION_HEADERS[i].VirtualAddress && VA < PEFILE_SECTION_HEADERS[i].VirtualAddress + PEFILE_SECTION_HEADERS[i].Misc.VirtualSize) {
+                in = i;
+                break;
+            }
+        }
+        return in;
+    }
+    DWORD resolve(DWORD VA, int index) {
+        return (VA - PEFILE_SECTION_HEADERS[index].VirtualAddress) + PEFILE_SECTION_HEADERS[index].PointerToRawData;
+    }
 
     // PARSERS
-    void ParseFile();
-    void ParseDOSHeader();
-    void ParseNTHeaders();
-    void ParseSectionHeaders();
+    void ParseFile() {
+        ParseDOSHeader();
+        ParseRichHeader();
+        ParseNTHeaders();
+        ParseSectionHeaders();
+    }
+    void ParseDOSHeader() {
+        fseek(Ppefile, 0, 0);
+        fread(&PEFILE_DOS_HEADER, sizeof(IMAGE_DOS_HEADER), 1, Ppefile);
+        PEFILE_DOS_HEADER_EMAGIC = PEFILE_DOS_HEADER.e_magic;
+        PEFILE_DOS_HEADER_LFANEW = PEFILE_DOS_HEADER.e_lfanew;
+    }
+    void ParseNTHeaders(){
+        fseek(Ppefile,PEFILE_DOS_HEADER_LFANEW,SEEK_SET);
+        fread(&PEFILE_NT_HEADERS,sizeof(IMAGE_NT_HEADERS64),1,Ppefile);
+
+        PEFILE_NT_HEADERS_SIGNATURE=PEFILE_NT_HEADERS.Signature;
+
+        PEFILE_NT_HEADERS_FILE_HEADER_MACHINE=PEFILE_NT_HEADERS.FileHeader.Machine;
+        PEFILE_NT_HEADERS_FILE_HEADER_NUMBER0F_SECTIONS=PEFILE_NT_HEADERS.FileHeader.NumberOfSections;
+        PEFILE_NT_HEADERS_FILE_HEADER_SIZEOF_OPTIONAL_HEADER=PEFILE_NT_HEADERS.FileHeader.SizeOfOptionalHeader;
+
+        PEFILE_NT_HEADERS_OPTIONAL_HEADER_MAGIC=PEFILE_NT_HEADERS.OptionalHeader.Magic;
+        PEFILE_NT_HEADERS_OPTIONAL_HEADER_SIZEOF_CODE=PEFILE_NT_HEADERS.OptionalHeader.SizeOfCode;
+        PEFILE_NT_HEADERS_OPTIONAL_HEADER_SIZEOF_INITIALIZED_DATA=PEFILE_NT_HEADERS.OptionalHeader.SizeOfInitializedData;
+        PEFILE_NT_HEADERS_OPTIONAL_HEADER_SIZEOF_UNINITIALIZED_DATA=PEFILE_NT_HEADERS.OptionalHeader.SizeOfUninitializedData;
+        PEFILE_NT_HEADERS_OPTIONAL_HEADER_ADDRESSOF_ENTRYPOINT=PEFILE_NT_HEADERS.OptionalHeader.AddressOfEntryPoint;
+        PEFILE_NT_HEADERS_OPTIONAL_HEADER_BASEOF_CODE=PEFILE_NT_HEADERS.OptionalHeader.BaseOfCode;
+        PEFILE_NT_HEADERS_OPTIONAL_HEADER_IMAGEBASE=PEFILE_NT_HEADERS.OptionalHeader.ImageBase;
+        PEFILE_NT_HEADERS_OPTIONAL_HEADER_SECTION_ALIGNMENT=PEFILE_NT_HEADERS.OptionalHeader.SectionAlignment;
+        PEFILE_NT_HEADERS_OPTIONAL_HEADER_FILE_ALIGNMENT=PEFILE_NT_HEADERS.OptionalHeader.FileAlignment;
+        PEFILE_NT_HEADERS_OPTIONAL_HEADER_SIZEOF_IMAGE=PEFILE_NT_HEADERS.OptionalHeader.SizeOfImage;
+        PEFILE_NT_HEADERS_OPTIONAL_HEADER_SIZEOF_HEADERS=PEFILE_NT_HEADERS.OptionalHeader.SizeOfHeaders;
+
+        PEFILE_EXPORT_DIRECTORY=PEFILE_NT_HEADERS.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+        PEFILE_IMPORT_DIRECTORY=PEFILE_NT_HEADERS.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+        PEFILE_RESOURCE_DIRECTORY=PEFILE_NT_HEADERS.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_RESOURCE];
+        PEFILE_EXCEPTION_DIRECTORY=PEFILE_NT_HEADERS.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+        PEFILE_SECURITY_DIRECTORY=PEFILE_NT_HEADERS.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_SECURITY];
+        PEFILE_BASERELOC_DIRECTORY=PEFILE_NT_HEADERS.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
+        PEFILE_DEBUG_DIRECTORY=PEFILE_NT_HEADERS.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
+        PEFILE_ARCHITECTURE_DIRECTORY=PEFILE_NT_HEADERS.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_ARCHITECTURE];
+        PEFILE_GLOBALPTR_DIRECTORY=PEFILE_NT_HEADERS.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_GLOBALPTR];
+        PEFILE_TLS_DIRECTORY=PEFILE_NT_HEADERS.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS];
+        PEFILE_LOAD_CONFIG_DIRECTORY=PEFILE_NT_HEADERS.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG];
+        PEFILE_BOUND_IMPORT_DIRECTORY=PEFILE_NT_HEADERS.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT];
+        PEFILE_IAT_DIRECTORY=PEFILE_NT_HEADERS.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT];
+        PEFILE_DELAY_IMPORT_DIRECTORY=PEFILE_NT_HEADERS.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT];
+        PEFILE_COM_DESCRIPTOR_DIRECTORY=PEFILE_NT_HEADERS.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR];
+    }
+    void ParseSectionHeaders(){
+        PEFILE_SECTION_HEADERS=new IMAGE_SECTION_HEADER[PEFILE_NT_HEADERS_FILE_HEADER_NUMBER0F_SECTIONS];
+        long offset=PEFILE_DOS_HEADER_LFANEW+sizeof(IMAGE_NT_HEADERS64);
+        for (int i=0;i<PEFILE_NT_HEADERS_FILE_HEADER_NUMBER0F_SECTIONS;i++){
+            fseek(Ppefile,offset,SEEK_SET);
+            fread(PEFILE_SECTION_HEADERS+i,IMAGE_SIZEOF_SECTION_HEADER,1,Ppefile);
+            offset+=IMAGE_SIZEOF_SECTION_HEADER;
+        }
+    }
     void ParseImportDirectory();
     void ParseBaseReloc();
-    void ParseRichHeader();
+    void ParseRichHeader() {
+        char BeforeNewHeader[PEFILE_DOS_HEADER_LFANEW];
+        fseek(Ppefile,0,0);
+        fread(&BeforeNewHeader,PEFILE_DOS_HEADER_LFANEW,1,Ppefile);
+
+        int rich=0;
+        for (int i=0;i<PEFILE_DOS_HEADER_LFANEW-1;i+=4){
+            if(BeforeNewHeader[i]==0x52 && BeforeNewHeader[i+1]==0x69)
+                rich=i;
+        }
+        if (rich==0) {
+            PEFILE_RICH_HEADER_INFO.entries=0;
+            return;
+        }
+        else{
+            char key[4];
+            memcpy(key, &(BeforeNewHeader[rich + 4]), 4);
+            int offsetRich=rich;
+            while(offsetRich>0){
+                offsetRich-=4;
+                char tmp[4];
+                memcpy(tmp,&BeforeNewHeader[offsetRich],4);
+                for (int j=0;j<4;j++){
+                    tmp[j]=tmp[j]^key[j];
+                }
+                if (tmp[3]==0x53 && tmp[2]==0x6e){
+                    break;
+                }
+            }
+            int sizeRich=(rich-offsetRich-4);
+            char dataRich[sizeRich];
+            memcpy(dataRich,&(BeforeNewHeader[offsetRich]),sizeRich);
+
+            for (int i; i < sizeRich; i++)
+                dataRich[i] = dataRich[i] ^ key[i % 4];
+
+            PEFILE_RICH_HEADER_INFO.size=sizeRich;
+            PEFILE_RICH_HEADER_INFO.ptrToBuffer=dataRich;
+            PEFILE_RICH_HEADER_INFO.entries=(sizeRich-16)/8;
+
+            PEFILE_RICH_HEADER.entries=new RICH_HEADER_ENTRY[PEFILE_RICH_HEADER_INFO.entries];
+
+            for (int i=16;i<sizeRich;i+=8){
+                int entryIndex=i/8 - 2;
+                PEFILE_RICH_HEADER.entries[entryIndex].buildID= (unsigned char)dataRich[i+3]<<8 | (unsigned char)dataRich[i+2];
+                PEFILE_RICH_HEADER.entries[entryIndex].prodID= (unsigned char)dataRich[i+1]<<8 | (unsigned char)dataRich[i];
+                PEFILE_RICH_HEADER.entries[entryIndex].useCount= (unsigned char)dataRich[i+7]<<24 | (unsigned char)dataRich[i+6]<<16 | (unsigned char)dataRich[i+5]<<8 | (unsigned char)dataRich[i+4];
+
+            }
+        }
+        PEFILE_RICH_HEADER_INFO.ptrToBuffer=0;
+    }
 
     // PRINT INFO
     void PrintFileInfo();
-    void PrintDOSHeaderInfo();
-    void PrintRichHeaderInfo();
-    void PrintNTHeadersInfo();
-    void PrintSectionHeadersInfo();
+    void PrintDOSHeaderInfo() {
+        printf("<<< DOS Header >>>\n");
+        printf(" Magic: 0x%X\n", PEFILE_DOS_HEADER_EMAGIC);
+        printf(" Pointer to PE header: 0x%X\n", PEFILE_DOS_HEADER_EMAGIC);
+    }
+    void PrintRichHeaderInfo() {
+        if (PEFILE_RICH_HEADER_INFO.entries!=0){
+            printf("<<< Rich Header >>>\n");
+            printf(" Entries:\n");
+            for (int i=0;i<PEFILE_RICH_HEADER_INFO.entries;i++)
+                printf(" \t+The BuildId: 0x%X\t+The ProductID: 0x%X\t+The count: 0x%X\n", PEFILE_RICH_HEADER.entries[i].buildID, PEFILE_RICH_HEADER.entries[i].prodID,
+                       PEFILE_RICH_HEADER.entries[i].useCount);
+        }
+
+
+    }
+    void PrintNTHeadersInfo(){
+        printf("<<< NT Header >>>\n");
+        printf(" PE Signature: 0x%lX\n", PEFILE_NT_HEADERS_SIGNATURE);
+
+        printf("\n File Header:\n\n");
+        printf("   Machine: 0x%X\n", PEFILE_NT_HEADERS_FILE_HEADER_MACHINE);
+        printf("   Number of sections: 0x%X\n", PEFILE_NT_HEADERS_FILE_HEADER_NUMBER0F_SECTIONS);
+        printf("   Size of optional header: 0x%X\n", PEFILE_NT_HEADERS_FILE_HEADER_SIZEOF_OPTIONAL_HEADER);
+
+        printf("\n Optional Header:\n\n");
+        printf("   Magic: 0x%lX\n", PEFILE_NT_HEADERS_OPTIONAL_HEADER_MAGIC);
+        printf("   Size of code section: 0x%lX\n", PEFILE_NT_HEADERS_OPTIONAL_HEADER_SIZEOF_CODE);
+        printf("   Size of initialized data: 0x%lX\n", PEFILE_NT_HEADERS_OPTIONAL_HEADER_SIZEOF_INITIALIZED_DATA);
+        printf("   Size of uninitialized data: 0x%lX\n", PEFILE_NT_HEADERS_OPTIONAL_HEADER_SIZEOF_UNINITIALIZED_DATA);
+        printf("   Address of entry point: 0x%lX\n", PEFILE_NT_HEADERS_OPTIONAL_HEADER_ADDRESSOF_ENTRYPOINT);
+        printf("   RVA of start of code section: 0x%lX\n", PEFILE_NT_HEADERS_OPTIONAL_HEADER_BASEOF_CODE);
+        printf("   Desired image base: 0x%llX\n", PEFILE_NT_HEADERS_OPTIONAL_HEADER_IMAGEBASE);
+        printf("   Section alignment: 0x%lX\n", PEFILE_NT_HEADERS_OPTIONAL_HEADER_SECTION_ALIGNMENT);
+        printf("   File alignment: 0x%lX\n", PEFILE_NT_HEADERS_OPTIONAL_HEADER_FILE_ALIGNMENT);
+        printf("   Size of image: 0x%lX\n", PEFILE_NT_HEADERS_OPTIONAL_HEADER_SIZEOF_IMAGE);
+        printf("   Size of headers: 0x%lX\n", PEFILE_NT_HEADERS_OPTIONAL_HEADER_SIZEOF_HEADERS);
+
+        printf("\n Data Directories:\n");
+        printf("\n   * Export Directory:\n");
+        printf("       RVA: 0x%lX\n", PEFILE_EXPORT_DIRECTORY.VirtualAddress);
+        printf("       Size: 0x%lX\n", PEFILE_EXPORT_DIRECTORY.Size);
+
+        printf("\n   * Import Directory:\n");
+        printf("       RVA: 0x%lX\n", PEFILE_IMPORT_DIRECTORY.VirtualAddress);
+        printf("       Size: 0x%lX\n", PEFILE_IMPORT_DIRECTORY.Size);
+
+        printf("\n   * Resource Directory:\n");
+        printf("       RVA: 0x%lX\n", PEFILE_RESOURCE_DIRECTORY.VirtualAddress);
+        printf("       Size: 0x%lX\n", PEFILE_RESOURCE_DIRECTORY.Size);
+
+        printf("\n   * Exception Directory:\n");
+        printf("       RVA: 0x%lX\n", PEFILE_EXCEPTION_DIRECTORY.VirtualAddress);
+        printf("       Size: 0x%lX\n", PEFILE_EXCEPTION_DIRECTORY.Size);
+
+        printf("\n   * Security Directory:\n");
+        printf("       RVA: 0x%lX\n", PEFILE_SECURITY_DIRECTORY.VirtualAddress);
+        printf("       Size: 0x%lX\n", PEFILE_SECURITY_DIRECTORY.Size);
+
+        printf("\n   * Base Relocation Table:\n");
+        printf("       RVA: 0x%lX\n", PEFILE_BASERELOC_DIRECTORY.VirtualAddress);
+        printf("       Size: 0x%lX\n", PEFILE_BASERELOC_DIRECTORY.Size);
+
+        printf("\n   * Debug Directory:\n");
+        printf("       RVA: 0x%lX\n", PEFILE_DEBUG_DIRECTORY.VirtualAddress);
+        printf("       Size: 0x%lX\n", PEFILE_DEBUG_DIRECTORY.Size);
+
+        printf("\n   * Architecture Specific Data:\n");
+        printf("       RVA: 0x%lX\n", PEFILE_ARCHITECTURE_DIRECTORY.VirtualAddress);
+        printf("       Size: 0x%lX\n", PEFILE_ARCHITECTURE_DIRECTORY.Size);
+
+        printf("\n   * RVA of GlobalPtr:\n");
+        printf("       RVA: 0x%lX\n", PEFILE_GLOBALPTR_DIRECTORY.VirtualAddress);
+        printf("       Size: 0x%lX\n", PEFILE_GLOBALPTR_DIRECTORY.Size);
+
+        printf("\n   * TLS Directory:\n");
+        printf("       RVA: 0x%lX\n", PEFILE_TLS_DIRECTORY.VirtualAddress);
+        printf("       Size: 0x%lX\n", PEFILE_TLS_DIRECTORY.Size);
+
+        printf("\n   * Load Configuration Directory:\n");
+        printf("       RVA: 0x%lX\n", PEFILE_LOAD_CONFIG_DIRECTORY.VirtualAddress);
+        printf("       Size: 0x%lX\n", PEFILE_LOAD_CONFIG_DIRECTORY.Size);
+
+        printf("\n   * Bound Import Directory:\n");
+        printf("       RVA: 0x%lX\n", PEFILE_BOUND_IMPORT_DIRECTORY.VirtualAddress);
+        printf("       Size: 0x%lX\n", PEFILE_BOUND_IMPORT_DIRECTORY.Size);
+
+        printf("\n   * Import Address Table:\n");
+        printf("       RVA: 0x%lX\n", PEFILE_IAT_DIRECTORY.VirtualAddress);
+        printf("       Size: 0x%lX\n", PEFILE_IAT_DIRECTORY.Size);
+
+        printf("\n   * Delay Load Import Descriptors:\n");
+        printf("       RVA: 0x%lX\n", PEFILE_DELAY_IMPORT_DIRECTORY.VirtualAddress);
+        printf("       Size: 0x%lX\n", PEFILE_IAT_DIRECTORY.Size);
+
+        printf("\n   * COM Runtime Descriptor:\n");
+        printf("       RVA: 0x%lX\n", PEFILE_COM_DESCRIPTOR_DIRECTORY.VirtualAddress);
+        printf("       Size: 0x%lX\n", PEFILE_COM_DESCRIPTOR_DIRECTORY.Size);
+
+
+
+
+    }
+    void PrintSectionHeadersInfo(){
+        printf("<<< Section Headers >>>\n");
+        for (int i=0;i<PEFILE_NT_HEADERS_FILE_HEADER_NUMBER0F_SECTIONS;i++){
+            printf("\n\t ** Name: %.8s **\n",PEFILE_SECTION_HEADERS[i].Name);
+            printf(" * Virtual Size: 0x%lX\n",PEFILE_SECTION_HEADERS[i].Misc.VirtualSize);
+            printf(" * Virtual Address: 0x%lX\n",PEFILE_SECTION_HEADERS[i].VirtualAddress);
+            printf(" * Size Of Raw Data: 0x%lX\n",PEFILE_SECTION_HEADERS[i].SizeOfRawData);
+            printf(" * RawData Address: 0x%lX\n",PEFILE_SECTION_HEADERS[i].PointerToRawData);
+
+        }
+    }
     void PrintImportTableInfo();
     void PrintBaseRelocationsInfo();
 };
