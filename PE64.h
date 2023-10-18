@@ -14,6 +14,7 @@ public:
         PrintRichHeaderInfo();
         PrintNTHeadersInfo();
         PrintSectionHeadersInfo();
+        PrintImportTableInfo();
     }
 
 private:
@@ -103,6 +104,7 @@ private:
         ParseRichHeader();
         ParseNTHeaders();
         ParseSectionHeaders();
+        ParseImportDirectory();
     }
     void ParseDOSHeader() {
         fseek(Ppefile, 0, 0);
@@ -157,7 +159,31 @@ private:
             offset+=IMAGE_SIZEOF_SECTION_HEADER;
         }
     }
-    void ParseImportDirectory();
+    void ParseImportDirectory(){
+        _import_directory_count=0;
+        int inSection=locate(PEFILE_IMPORT_DIRECTORY.VirtualAddress);
+        DWORD offsetIt= resolve(PEFILE_IMPORT_DIRECTORY.VirtualAddress,inSection);
+        DWORD offset=offsetIt;
+        while(true){
+            IMAGE_IMPORT_DESCRIPTOR tmpIID;
+            fseek(Ppefile,offset,SEEK_SET);
+            fread(&tmpIID,sizeof(IMAGE_IMPORT_DESCRIPTOR),1,Ppefile);
+            if (tmpIID.OriginalFirstThunk==0 && tmpIID.Name==0 && tmpIID.TimeDateStamp==0 && tmpIID.ForwarderChain==0 && tmpIID.FirstThunk==0){
+                break;
+            }
+            offset+=sizeof(IMAGE_IMPORT_DESCRIPTOR);
+            _import_directory_count+=1;
+        }
+        _import_directory_size=_import_directory_count*sizeof(IMAGE_IMPORT_DESCRIPTOR);
+        PEFILE_IMPORT_TABLE = new IMAGE_IMPORT_DESCRIPTOR[_import_directory_count];
+        offset=offsetIt;
+        for(int i=0;i<_import_directory_count;i++){
+            fseek(Ppefile,offset,SEEK_SET);
+            fread(PEFILE_IMPORT_TABLE+i,sizeof(IMAGE_IMPORT_DESCRIPTOR),1,Ppefile);
+            offset+=sizeof(IMAGE_IMPORT_DESCRIPTOR);
+        }
+
+    }
     void ParseBaseReloc();
     void ParseRichHeader() {
         char BeforeNewHeader[PEFILE_DOS_HEADER_LFANEW];
@@ -328,7 +354,66 @@ private:
 
         }
     }
-    void PrintImportTableInfo();
+    void PrintImportTableInfo(){
+        printf("<<< Import Table >>>\n");
+        for (int i=0;i<_import_directory_count;i++){
+            int nameAddr=resolve(PEFILE_IMPORT_TABLE[i].Name,locate(PEFILE_IMPORT_TABLE[i].Name));
+            int sizeName=0;
+            char tmpChar;
+            fseek(Ppefile,nameAddr,SEEK_SET);
+            fread(&tmpChar,sizeof(char),1,Ppefile);
+            while (tmpChar!='\0'){
+                sizeName++;
+                fseek(Ppefile,nameAddr+sizeName,SEEK_SET);
+                fread(&tmpChar,sizeof(char),1,Ppefile);
+            }
+
+            char Name[++sizeName];
+            fseek(Ppefile,nameAddr,SEEK_SET);
+            fread(&Name,sizeName,1,Ppefile);
+
+            printf(" * Name: %s\n\tFunctions:\n",Name);
+
+            DWORD ILTAddr=resolve(PEFILE_IMPORT_TABLE[i].OriginalFirstThunk,locate(PEFILE_IMPORT_TABLE[i].OriginalFirstThunk));
+
+            while(true){
+                u_int64 tmpILT;
+                fseek(Ppefile,ILTAddr,SEEK_SET);
+                fread(&tmpILT,sizeof(u_int64),1,Ppefile);
+                if(tmpILT==0){
+                    break;
+                }
+                else if ((tmpILT>>63 & 1)==1){
+                    int ordinal = tmpILT>>48 & 0xFFF;
+                    printf(" \t** Call By Ordinal: 0x%X\n",ordinal);
+
+                }
+                else if ((tmpILT>>63 & 1)==0){
+                    int sizeFuncName=0;
+                    long addrFuncName= resolve(tmpILT,locate(tmpILT));
+                    while(true){
+                        char tmpChar;
+                        fseek(Ppefile,addrFuncName+sizeFuncName,SEEK_SET);
+                        fread(&tmpChar,sizeof(char),1,Ppefile);
+                        if(tmpChar=='\0') {
+                            fseek(Ppefile,addrFuncName+sizeFuncName+1,SEEK_SET);
+                            fread(&tmpChar,sizeof(char),1,Ppefile);
+                            if (tmpChar=='\0'){
+                                break;
+                            }
+                             }
+                        sizeFuncName++;
+                    }
+                    char funcName[++sizeFuncName];
+                    fseek(Ppefile,addrFuncName +sizeof(WORD),SEEK_SET);
+                    fread(&funcName,sizeFuncName,1,Ppefile);
+                    printf("\t ** %s\n",funcName);
+                }
+                ILTAddr+=sizeof(u_int64);
+
+        }
+        }
+    }
     void PrintBaseRelocationsInfo();
 };
 
