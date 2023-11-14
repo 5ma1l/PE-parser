@@ -1,4 +1,5 @@
 #include "wind_struct.h"
+
 class PE64
 {
 public:
@@ -15,6 +16,7 @@ public:
         PrintNTHeadersInfo();
         PrintSectionHeadersInfo();
         PrintImportTableInfo();
+        PrintBaseRelocationsInfo();
     }
 
 private:
@@ -105,6 +107,7 @@ private:
         ParseNTHeaders();
         ParseSectionHeaders();
         ParseImportDirectory();
+        ParseBaseReloc();
     }
     void ParseDOSHeader() {
         fseek(Ppefile, 0, 0);
@@ -184,7 +187,47 @@ private:
         }
 
     }
-    void ParseBaseReloc();
+    void ParseBaseReloc(){
+
+        if (PEFILE_BASERELOC_DIRECTORY.VirtualAddress!=0){
+            _basreloc_directory_count=0;
+            int currOffset= resolve(PEFILE_BASERELOC_DIRECTORY.VirtualAddress,locate(PEFILE_BASERELOC_DIRECTORY.VirtualAddress));
+            while (true) {
+                IMAGE_BASE_RELOCATION *tmpReloc;
+                tmpReloc=(IMAGE_BASE_RELOCATION *)malloc(sizeof(IMAGE_BASE_RELOCATION));
+
+                fseek(Ppefile,currOffset,SEEK_SET);
+                fread(tmpReloc,sizeof(IMAGE_BASE_RELOCATION),1,Ppefile);
+
+                currOffset+=tmpReloc->SizeOfBlock;
+
+                if (tmpReloc->VirtualAddress==0) {
+                    free(tmpReloc);
+                    break;
+                }
+
+                free(tmpReloc);
+
+
+                _basreloc_directory_count++;
+
+            }
+
+            currOffset= resolve(PEFILE_BASERELOC_DIRECTORY.VirtualAddress,locate(PEFILE_BASERELOC_DIRECTORY.VirtualAddress));
+
+
+            PEFILE_BASERELOC_TABLE=new IMAGE_BASE_RELOCATION[_basreloc_directory_count];
+
+            for (int i=0;i<_basreloc_directory_count;i++){
+                fseek(Ppefile,currOffset,SEEK_SET);
+                fread(&PEFILE_BASERELOC_TABLE[i],sizeof(IMAGE_BASE_RELOCATION),1,Ppefile);
+                currOffset+=PEFILE_BASERELOC_TABLE[i].SizeOfBlock;
+
+            }
+
+        }
+
+    }
     void ParseRichHeader() {
         char BeforeNewHeader[PEFILE_DOS_HEADER_LFANEW];
         fseek(Ppefile,0,0);
@@ -239,7 +282,6 @@ private:
     }
 
     // PRINT INFO
-    void PrintFileInfo();
     void PrintDOSHeaderInfo() {
         printf("<<< DOS Header >>>\n");
         printf(" Magic: 0x%X\n", PEFILE_DOS_HEADER_EMAGIC);
@@ -372,25 +414,25 @@ private:
             fseek(Ppefile,nameAddr,SEEK_SET);
             fread(&Name,sizeName,1,Ppefile);
 
-            printf(" * Name: %s\n\tFunctions:\n",Name);
+            printf(" * Name: %s\n\tEntries:\n",Name);
 
             DWORD ILTAddr=resolve(PEFILE_IMPORT_TABLE[i].OriginalFirstThunk,locate(PEFILE_IMPORT_TABLE[i].OriginalFirstThunk));
 
             while(true){
-                u_int64 tmpILT;
+                ILT_ENTRY_64 tmpILT;
                 fseek(Ppefile,ILTAddr,SEEK_SET);
-                fread(&tmpILT,sizeof(u_int64),1,Ppefile);
-                if(tmpILT==0){
+                fread(&tmpILT,sizeof(ILT_ENTRY_64),1,Ppefile);
+                if(tmpILT.FIELD_2.HINT_NAME_TABE==0){
                     break;
                 }
-                else if ((tmpILT>>63 & 1)==1){
-                    int ordinal = tmpILT>>48 & 0xFFF;
-                    printf(" \t** Call By Ordinal: 0x%X\n",ordinal);
+                else if (tmpILT.ORDINAL_NAME_FLAG==1){
+                    int ordinal = tmpILT.FIELD_2.ORDINAL;
+                    printf(" \t** 0x%X\n",ordinal);
 
                 }
-                else if ((tmpILT>>63 & 1)==0){
+                else if ((tmpILT.ORDINAL_NAME_FLAG)==0){
                     int sizeFuncName=0;
-                    long addrFuncName= resolve(tmpILT,locate(tmpILT));
+                    long addrFuncName= resolve(tmpILT.FIELD_2.HINT_NAME_TABE,locate(tmpILT.FIELD_2.HINT_NAME_TABE));
                     while(true){
                         char tmpChar;
                         fseek(Ppefile,addrFuncName+sizeFuncName,SEEK_SET);
@@ -409,11 +451,47 @@ private:
                     fread(&funcName,sizeFuncName,1,Ppefile);
                     printf("\t ** %s\n",funcName);
                 }
-                ILTAddr+=sizeof(u_int64);
+
+                ILTAddr+=sizeof(ILT_ENTRY_64);
 
         }
         }
     }
-    void PrintBaseRelocationsInfo();
+    void PrintBaseRelocationsInfo(){
+            if (PEFILE_BASERELOC_TABLE!=NULL){
+                printf("<<< Base Relocation >>>\n");
+                for (int i=0;i<_basreloc_directory_count;i++){
+                    DWORD pageRVA=PEFILE_BASERELOC_TABLE[i].VirtualAddress;
+                    DWORD sizeBlock=PEFILE_BASERELOC_TABLE[i].SizeOfBlock;
+                    int entries=(sizeBlock-sizeof(IMAGE_BASE_RELOCATION ))/sizeof(BASE_RELOC_ENTRY);
+
+                    printf("\t * The page RVA: 0x%X\n",pageRVA);
+                    printf("\t * The size of block: 0x%X\n",sizeBlock);
+                    printf("\t * The number of entries: %u\n",entries);
+                    printf("\t * Entries:\n");
+
+                    int offset=resolve(PEFILE_BASERELOC_DIRECTORY.VirtualAddress,locate(PEFILE_BASERELOC_DIRECTORY.VirtualAddress))+sizeof(IMAGE_BASE_RELOCATION );
+                    for (int j=0;j<entries;j++){
+                        PBASE_RELOC_ENTRY tmpEntry;
+                        tmpEntry=(BASE_RELOC_ENTRY *)malloc(sizeof(BASE_RELOC_ENTRY ));
+
+                        fseek(Ppefile,offset,SEEK_SET);
+                        fread(tmpEntry,sizeof(BASE_RELOC_ENTRY ),1,Ppefile);
+
+                        printf("\t\t * Entry %d :\n",j+1);
+
+                        int entryOffset=tmpEntry->OFFSET+PEFILE_BASERELOC_DIRECTORY.VirtualAddress;
+                        printf("\t\t\t - Type : %u\n",tmpEntry->TYPE);
+                        printf("\t\t\t - RVA : 0x%X\n",entryOffset);
+
+
+                        offset+=sizeof(BASE_RELOC_ENTRY );
+
+                        free(tmpEntry);
+                    }
+
+                }
+            }
+    }
 };
 

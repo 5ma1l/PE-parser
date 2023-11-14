@@ -1,4 +1,5 @@
 #include <Windows.h>
+#include <String.h>
 
 typedef struct __RICH_HEADER_INFO {
     int size;
