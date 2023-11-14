@@ -1,5 +1,4 @@
-#include <stdio.h>
-#include "PE64.h"
+#include "PE.h"
 
 
 int isPE(FILE* PpeFile) {
@@ -57,7 +56,8 @@ int main(int argc, char* argv[])
         return 1;
     }
     else if (is32(Ppefile)==32){
-        printf("32bit not ready yet!");
+        PE32 peFile32(argv[1], Ppefile);
+        peFile32.PrintInfo();
     }
     else if (is64(Ppefile) == 64) {
         PE64 peFile64(argv[1], Ppefile);
@@ -69,4 +69,3 @@ int main(int argc, char* argv[])
 
 
 }
-

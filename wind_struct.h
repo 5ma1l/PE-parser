@@ -1,6 +1,6 @@
 #include <Windows.h>
 #include <String.h>
-
+#include <stdio.h>
 typedef struct __RICH_HEADER_INFO {
     int size;
     char* ptrToBuffer;
